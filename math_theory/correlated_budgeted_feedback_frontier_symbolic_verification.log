@@ -1,0 +1,148 @@
+{
+  "pairwise_reduction_gap": "0",
+  "rademacher_kl_series": "m**2/2 + m**4/12 + m**6/30 + O(m**8)",
+  "leading_binary_width_gain": "2**(k/2)*eps**(k/2)/k**(k/2)",
+  "duplicate_feature_projection_energy": "r**2",
+  "balanced_width_probability_sum_checks": [
+    {
+      "capacities": [
+        3,
+        3,
+        3
+      ],
+      "k": 1,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        3,
+        3,
+        3
+      ],
+      "k": 2,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        3,
+        3,
+        3
+      ],
+      "k": 3,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        3,
+        3,
+        3
+      ],
+      "k": 4,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        3,
+        3,
+        3
+      ],
+      "k": 5,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        4,
+        2,
+        3
+      ],
+      "k": 1,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        4,
+        2,
+        3
+      ],
+      "k": 2,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        4,
+        2,
+        3
+      ],
+      "k": 3,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        4,
+        2,
+        3
+      ],
+      "k": 4,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        4,
+        2,
+        3
+      ],
+      "k": 5,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "k": 1,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "k": 2,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "k": 3,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "k": 4,
+      "gap": "0"
+    },
+    {
+      "capacities": [
+        2,
+        2,
+        2,
+        2
+      ],
+      "k": 5,
+      "gap": "0"
+    }
+  ]
+}

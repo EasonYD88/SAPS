@@ -1,0 +1,21 @@
+== py_compile ==
+py_compile: PASS
+== numerical verification ==
+numerical script: PASS
+== symbolic verification ==
+symbolic script: PASS
+== JSON and finite-value validation ==
+/mnt/data/correlated_budgeted_feedback_frontier_results.json PASS
+/mnt/data/correlated_budgeted_feedback_frontier_symbolic_results.json PASS
+== report integrity ==
+report lines 1534
+display math pairs 116
+report integrity: PASS
+== key assertions summary ==
+gram max violation 0.0
+surrogate guarantee violation 0.0
+schur gap 2.842170943040401e-14
+finite budget max gap 2.8689005923503152e-18
+laminar gap 8.881784197001252e-16
+treewidth path gap 8.881784197001252e-16
+balanced distribution max error 0.0

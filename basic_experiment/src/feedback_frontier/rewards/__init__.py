@@ -1,0 +1,2 @@
+"""Synthetic terminal rewards."""
+

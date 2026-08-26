@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "feedback-frontier"
+version = "0.1.0"
+description = "Synthetic SAPS feedback-frontier experiments"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=2.0,<3",
+  "scipy>=1.13,<2",
+  "pandas>=2.2,<3",
+  "pyarrow>=16,<20",
+  "PyYAML>=6,<7",
+  "matplotlib>=3.9,<4",
+  "seaborn>=0.13,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9"]
+
+[project.scripts]
+feedback-frontier = "feedback_frontier.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

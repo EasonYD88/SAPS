@@ -1,0 +1,29 @@
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    from feedback_frontier.cli import main; raise SystemExit(main())
+                                                             ~~~~^^
+  File "/scratch/yd2915/SAPS/basic_experiment/src/feedback_frontier/cli.py", line 46, in main
+    run_experiment(
+    ~~~~~~~~~~~~~~^
+        cfg,
+        ^^^^
+    ...<2 lines>...
+        frozen_calibration_path=args.frozen_calibration,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/scratch/yd2915/SAPS/basic_experiment/src/feedback_frontier/runners/evaluate_planner.py", line 1424, in run_experiment
+    _run_experiment(
+    ~~~~~~~~~~~~~~~^
+        config,
+        ^^^^^^^
+    ...<3 lines>...
+        frozen_calibration_sha256=calibration_sha256,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/scratch/yd2915/SAPS/basic_experiment/src/feedback_frontier/runners/evaluate_planner.py", line 831, in _run_experiment
+    raise RuntimeError(
+    ...<2 lines>...
+    )
+RuntimeError: calibration_inconclusive before held-out evaluation: calibration_inconclusive: missing or undersampled width

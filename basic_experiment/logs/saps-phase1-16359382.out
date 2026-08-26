@@ -1,0 +1,7 @@
+job_id=16359382 host=cs601.hpc.nyu.edu config=configs/smoke.yaml run_id=phase1-smoke-formal-v2
+valid: d=12 q=4 instances=16
+completed example=s0-i0 library=oracle rows=168
+completed example=s0-i0 library=random_matched rows=336
+completed example=s0-i0 library=structural rows=504
+completed example=s0-i1 library=oracle rows=672
+completed example=s0-i1 library=random_matched rows=840

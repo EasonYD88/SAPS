@@ -1,0 +1,36 @@
+d: 12
+q: 4
+num_instances: 16
+couplings: [0.0, 0.7]
+topologies: [chain, balanced_tree]
+rewards: [unary, pairwise, modular, mixed]
+candidate_libraries: [oracle, structural, random_matched]
+methods:
+  - random_balanced
+  - confidence
+  - entropy
+  - dependency_cmi
+  - min_within_batch_tc
+  - dprm_myopic
+  - dprm_rollout
+  - subset_exact
+  - subset_beam_8
+  - subset_beam_32
+  - saps_diagonal
+  - p_saps_residualized
+  - p_saps_projection
+  - b_saps_budgeted
+rounds: [1, 2, 3, 4]
+epsilons: [0.01, 0.05, 0.15]
+seeds: [0, 1]
+rollouts: 2
+response_directions: 8
+adaptation_trajectories: 40
+width_calibration_minimum: 20
+calibration_requested_per_cell: 24
+calibration_max_per_cell: 32
+dprm_beta: 1.0
+ridge_multipliers: [1.0e-5, 1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1]
+bootstrap_replicates: 10000
+theory_report_sha256: d0341f361899927fb6616b7ba059b4cc490a793619e9282758e41b88789486aa
+theory_results_sha256: fae39d94526f283e59971700a39d128848995ca41eb064dd41e6c6863cb1b12c

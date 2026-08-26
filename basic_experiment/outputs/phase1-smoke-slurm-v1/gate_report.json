@@ -1,0 +1,22 @@
+{
+  "decision": "INCONCLUSIVE",
+  "gates": {
+    "H1": {
+      "pass": null,
+      "reason": "not preregistered at this scale"
+    },
+    "H2": {
+      "pass": null,
+      "reason": "exact subset ratio requires main run"
+    },
+    "H3": {
+      "pass": null,
+      "reason": "fewer than 50 examples"
+    },
+    "H4": {
+      "pass": null,
+      "reason": "fewer than 50 examples"
+    }
+  },
+  "reason": "fewer than 50 examples"
+}

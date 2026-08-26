@@ -1,0 +1,84 @@
+{
+  "artifact_sha256": {
+    "response_probes.parquet": "e9e10e3a52f7f76f33081ae89c361500b82fa191265ee8bcde15b6bd570d3ed5",
+    "schedule_scores.csv": "fab7efbf2398c3defa3435fef24b0f301f47def3bc814b89144852dc5df3fea2",
+    "trajectory_results.parquet": "f6d5315e806b5901474c2b52dfbddfdd1a898e65ea6b37b2245a369f8401f1b6"
+  },
+  "config": {
+    "bootstrap_replicates": 10000,
+    "candidate_libraries": [
+      "oracle",
+      "structural",
+      "random_matched"
+    ],
+    "couplings": [
+      0.0,
+      0.7
+    ],
+    "d": 12,
+    "dprm_beta": 1.0,
+    "epsilons": [
+      0.01,
+      0.05,
+      0.15
+    ],
+    "methods": [
+      "random_balanced",
+      "confidence",
+      "entropy",
+      "dependency_cmi",
+      "min_within_batch_tc",
+      "dprm_myopic",
+      "dprm_rollout",
+      "subset_exact",
+      "subset_beam_8",
+      "subset_beam_32",
+      "saps_diagonal",
+      "p_saps_residualized",
+      "p_saps_projection",
+      "b_saps_budgeted"
+    ],
+    "num_instances": 16,
+    "q": 4,
+    "response_directions": 8,
+    "rewards": [
+      "unary",
+      "pairwise",
+      "modular",
+      "mixed"
+    ],
+    "ridge_multipliers": [
+      1e-05,
+      0.0001,
+      0.001,
+      0.01,
+      0.1
+    ],
+    "rollouts": 2,
+    "rounds": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "seeds": [
+      0,
+      1
+    ],
+    "theory_report_sha256": "d0341f361899927fb6616b7ba059b4cc490a793619e9282758e41b88789486aa",
+    "theory_results_sha256": "fae39d94526f283e59971700a39d128848995ca41eb064dd41e6c6863cb1b12c",
+    "topologies": [
+      "chain",
+      "balanced_tree"
+    ]
+  },
+  "row_counts": {
+    "response_probes": 5376,
+    "schedule_scores": 5376,
+    "trajectory_results": 5376
+  },
+  "status": "complete",
+  "theory_report_sha256": "d0341f361899927fb6616b7ba059b4cc490a793619e9282758e41b88789486aa",
+  "theory_results_sha256": "fae39d94526f283e59971700a39d128848995ca41eb064dd41e6c6863cb1b12c",
+  "wall_time_sec": 1470.7676083040424
+}
