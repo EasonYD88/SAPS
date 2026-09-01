@@ -45,6 +45,30 @@ def _select_external_frozen_calibration(
     return dict(calibrations[0]), str(digests[0])
 
 
+def _merge_instance_coverage(manifests: list[dict]) -> list[dict[str, object]]:
+    count_by_cell: dict[tuple[object, ...], int] = {}
+    fields = (
+        "data_split",
+        "reward_name",
+        "generator_regime",
+        "topology",
+        "coupling",
+    )
+    for manifest in manifests:
+        for row in manifest.get("instance_coverage", ()):
+            key = tuple(row.get(field) for field in fields)
+            count_by_cell[key] = count_by_cell.get(key, 0) + int(row["count"])
+    return [
+        {
+            **dict(zip(fields, key, strict=True)),
+            "count": count,
+        }
+        for key, count in sorted(
+            count_by_cell.items(), key=lambda item: tuple(map(str, item[0]))
+        )
+    ]
+
+
 def merge_shard_runs(shard_dirs: tuple[Path, ...], run_dir: Path) -> None:
     if not shard_dirs:
         raise ValueError("shard coverage is empty")
@@ -165,6 +189,7 @@ def merge_shard_runs(shard_dirs: tuple[Path, ...], run_dir: Path) -> None:
             "created_utc": datetime.now(timezone.utc).isoformat(),
             "config": reference["config"],
             "instance_ids": expected,
+            "instance_coverage": _merge_instance_coverage(manifests),
             "merged_from": [str(path) for path in shard_dirs],
             "development_ids": development_ids,
             "held_out_ids": held_out_ids,

@@ -1,0 +1,51 @@
+{
+  "artifact_sha256": {
+    "unary_null_diagnostics.parquet": "5279022c398eff1ae16627ee14a952e093a97cfce8bcb412adf005d0bd0834d5"
+  },
+  "controller_replicates": 16,
+  "created_utc": "2026-09-01T13:23:38.828226+00:00",
+  "information_flow": {
+    "diagnostics -> calibration": "forbidden",
+    "diagnostics -> schedule construction": "forbidden",
+    "held-out gain values -> diagnostics": "forbidden"
+  },
+  "interpretation": "replicates estimate conditional algorithmic randomness and do not increase the held-out reward-instance sample size",
+  "resources": {
+    "model_calls": 7734736,
+    "terminal_label_calls": 7993792,
+    "wall_time_sec": 2906.3382868301123
+  },
+  "reward_instance_count": 2,
+  "reward_instance_ids": [
+    "s0-i12",
+    "s1-i12"
+  ],
+  "rng_contract": {
+    "controller": "rollout/example/unary-diagnostic/controller-{id}/...",
+    "disjoint_from": [
+      "adaptation",
+      "gain-evaluation",
+      "subset-planning",
+      "dprm-planning",
+      "width_calibration_bank"
+    ],
+    "terminal": "base/example/unary-diagnostic/terminal-{id}/..."
+  },
+  "rollouts_per_action_value": 2,
+  "row_count": 240552,
+  "source_columns_used": [
+    "candidate_library",
+    "data_split",
+    "epsilon_target",
+    "example_id",
+    "num_rounds",
+    "schedule",
+    "schedule_id",
+    "scheduler"
+  ],
+  "source_experiment_manifest_sha256": "817200aa60d50294c12a44017be0daf62a63a30f1166cd248a5b9e5a74e64465",
+  "source_run_dir": "outputs/phase1-smoke-targeted-v3",
+  "source_schedule_scores_sha256": "16f79848ab612869182831158016cb2dc10d33c0167e2e238596efdc44c4fdc7",
+  "status": "complete",
+  "terminal_replicates": 16
+}

@@ -52,3 +52,44 @@ def test_adaptation_and_gain_evaluation_use_disjoint_rng_domains() -> None:
     assert {call[2] for call in adaptation_book.calls} == {"adaptation"}
     assert {call[2] for call in evaluation_book.calls} == {"gain-evaluation"}
     assert set(adaptation_book.calls).isdisjoint(evaluation_book.calls)
+
+
+def test_subset_planning_and_gain_evaluation_use_disjoint_rng_domains() -> None:
+    class TrackingSeedBook:
+        def __init__(self) -> None:
+            self.calls: list[tuple[object, ...]] = []
+            self.book = SeedBook(43)
+
+        def rng(self, namespace: str, *keys: object) -> np.random.Generator:
+            self.calls.append((namespace, *keys))
+            return self.book.rng(namespace, *keys)
+
+    model = CategoricalProduct(np.zeros((4, 2)))
+    reward = lambda tokens: float(tokens.sum())
+    book = TrackingSeedBook()
+    oracle = evaluate_planner._make_batch_value_oracle(
+        model,
+        reward,
+        rounds=2,
+        epsilon=0.05,
+        rollouts=1,
+        seedbook=book,
+        example_id="example",
+    )
+    oracle.value((0, 1))
+    planning_calls = set(book.calls)
+    book.calls.clear()
+    evaluate_planner._decode(
+        model,
+        reward,
+        Schedule(((0, 1), (2, 3)), 4),
+        epsilon=0.05,
+        rollouts=1,
+        seedbook=book,
+        example_id="example",
+        controlled=True,
+    )
+    evaluation_calls = set(book.calls)
+    assert planning_calls
+    assert evaluation_calls
+    assert planning_calls.isdisjoint(evaluation_calls)

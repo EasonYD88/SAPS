@@ -1,0 +1,8 @@
+job_id=16577803 shard=10/16 calibration=outputs/phase1-smoke-calibration-bank-v2/calibration_manifest.json
+completed example=s0-i10 library=oracle rows=168
+completed example=s0-i10 library=random_matched rows=336
+completed example=s0-i10 library=structural rows=504
+completed example=s1-i10 library=oracle rows=672
+completed example=s1-i10 library=random_matched rows=840
+completed example=s1-i10 library=structural rows=1008
+completed run_id=phase1-smoke-targeted-v2-shard-10-of-16

@@ -18,6 +18,142 @@ from feedback_frontier.runners import evaluate_planner
 from feedback_frontier.schemas import ScheduleScoreRecord, TrajectoryRecord
 
 
+class _CalibrationFakeModel:
+    d = 12
+    q = 4
+
+    def conditional_marginals(self, observed):
+        del observed
+        return np.full((self.d, self.q), 1.0 / self.q)
+
+
+class _CalibrationFakeReward:
+    name = "modular"
+    supports = ((0, 1, 2, 3, 4),)
+
+    def __call__(self, tokens):
+        return float(np.asarray(tokens).sum())
+
+
+def test_width_calibration_run_is_development_only_and_freezes_resources(
+    tmp_path, monkeypatch
+) -> None:
+    cfg = ExperimentConfig(
+        d=12,
+        q=4,
+        methods=("confidence",),
+        rounds=(1, 2, 3, 4),
+        epsilons=(0.05,),
+        rollouts=1,
+        num_instances=4,
+        couplings=(0.0,),
+        topologies=("chain", "balanced_tree"),
+        rewards=("modular",),
+        candidate_libraries=("oracle",),
+        seeds=(0,),
+        response_directions=1,
+        adaptation_trajectories=10,
+        width_calibration_minimum=1,
+        calibration_requested_per_cell=1,
+        calibration_max_per_cell=1,
+        bootstrap_replicates=10,
+        theory_report_sha256="d0341f361899927fb6616b7ba059b4cc490a793619e9282758e41b88789486aa",
+        theory_results_sha256="fae39d94526f283e59971700a39d128848995ca41eb064dd41e6c6863cb1b12c",
+    )
+    requested_instance_ids = []
+
+    def fake_instance(config, seed, instance_id):
+        del config, seed
+        requested_instance_ids.append(instance_id)
+        return None, _CalibrationFakeModel(), _CalibrationFakeReward(), "product", ()
+
+    def fake_geometry(model, reward, schedule, library, seedbook, example_id, n_samples, ridge_multiplier):
+        del schedule, library, seedbook, example_id, n_samples, ridge_multiplier
+        model.conditional_marginals({})
+        reward(np.zeros(model.d, dtype=int))
+        return evaluate_planner.GeometryEstimate(
+            gamma_pinv=1.0,
+            gamma_ridge=1.0,
+            gram_delta=0.0,
+            gram_condition=1.0,
+            fold_gammas=(1.0,) * 5,
+            reward_q75=0.0,
+            active_metadata=(((0, 1, 2, 3, 4), 0, 0),),
+            b=(1.0,),
+            scales=(1.0,),
+            gram=((1.0,),),
+        )
+
+    def fake_response(model, reward, schedule, geometry, epsilon, directions, rollouts, seedbook, example_id, schedule_id):
+        del schedule, geometry, directions, rollouts, seedbook, example_id, schedule_id
+        model.conditional_marginals({})
+        reward(np.zeros(model.d, dtype=int))
+        return evaluate_planner.FisherResponseEstimate(
+            response_power=float(epsilon),
+            mean_achieved_kl=float(epsilon),
+            positive_rank=1,
+            saturated=False,
+        )
+
+    monkeypatch.setattr(evaluate_planner, "_instance", fake_instance)
+    monkeypatch.setattr(evaluate_planner, "_estimate_geometry", fake_geometry)
+    monkeypatch.setattr(
+        evaluate_planner, "estimate_fisher_response_power", fake_response
+    )
+    run_dir = tmp_path / "calibration"
+    evaluate_planner.run_width_calibration(cfg, run_dir)
+
+    assert sorted(set(requested_instance_ids)) == [0, 1]
+    manifest = json.loads((run_dir / "calibration_manifest.json").read_text())
+    assert manifest["status"] == "complete"
+    assert manifest["development_ids"] == ["s0-i0", "s0-i1"]
+    assert manifest["resources"]["model_calls"] == 10
+    assert manifest["resources"]["terminal_label_calls"] == 10
+    assert manifest["resources"]["wall_time_sec"] > 0
+    coverage = pd.read_csv(run_dir / "calibration_coverage.csv")
+    assert set(coverage.width) == {1, 2, 3, 4, 5}
+    assert coverage.valid_count.eq(1).all()
+    bank = [
+        json.loads(line)
+        for line in (run_dir / "calibration_schedule_bank.jsonl").read_text().splitlines()
+    ]
+    assert {row["data_split"] for row in bank} == {"development"}
+    assert all("method" not in row for row in bank)
+    calibration, digest = evaluate_planner._load_frozen_calibration(
+        run_dir / "calibration_manifest.json", cfg
+    )
+    assert calibration["status"] == "complete"
+    assert len(digest) == 64
+    with (run_dir / "calibration_schedule_bank.jsonl").open("a") as stream:
+        stream.write("{}\n")
+    with pytest.raises(ValueError, match="artifact hash mismatch"):
+        evaluate_planner._load_frozen_calibration(
+            run_dir / "calibration_manifest.json", cfg
+        )
+
+
+def test_cli_calibrate_dispatches_to_independent_stage_a(tmp_path, monkeypatch) -> None:
+    config_path = Path("configs/smoke_calibration.yaml").resolve()
+    calls = []
+
+    def fake_calibration(config, run_dir):
+        calls.append((config, run_dir))
+
+    monkeypatch.setattr(evaluate_planner, "run_width_calibration", fake_calibration)
+    monkeypatch.chdir(tmp_path)
+    assert main(
+        [
+            "calibrate",
+            "--config",
+            str(config_path),
+            "--run-id",
+            "stage-a-test",
+        ]
+    ) == 0
+    assert len(calls) == 1
+    assert calls[0][1] == Path("outputs/stage-a-test")
+
+
 def test_tiny_run_and_analysis_contract(tmp_path) -> None:
     cfg = ExperimentConfig(
         d=6,
@@ -89,11 +225,20 @@ def test_tiny_run_and_analysis_contract(tmp_path) -> None:
     )
     assert protocol["zero_shot"] is False
     assert protocol["adaptation_gain_rng_disjoint"] is True
+    assert protocol["schedule_planning_gain_rng_disjoint"] is True
 
     report = analyze_run(run_dir, bootstrap_replicates=100)
     assert report["decision"] in {"GO", "NO_GO", "INCONCLUSIVE"}
     assert report["screening_decision"] in {"GO", "NO_GO", "INCONCLUSIVE"}
-    assert set(report["mechanism_gates"]) == {"M1", "M2", "M3", "M4", "M5", "M6"}
+    assert set(report["mechanism_gates"]) == {
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M5_exact",
+        "M5_fixed_budget",
+        "M6",
+    }
     assert report["evaluation_protocol"]["zero_shot"] is False
     assert "few-shot adaptation" in (
         run_dir / "gate_report.md"
@@ -489,6 +634,7 @@ def test_frozen_development_calibration_allows_qary_heldout_shard(
                 "config": {
                     "d": cfg.d,
                     "q": cfg.q,
+                    "instance_design": cfg.instance_design,
                     "epsilons": list(cfg.epsilons),
                     "candidate_libraries": list(cfg.candidate_libraries),
                     "couplings": list(cfg.couplings),
@@ -531,6 +677,11 @@ def test_frozen_development_calibration_allows_qary_heldout_shard(
     incompatible = json.loads(artifact.read_text())
     incompatible["config"]["rewards"] = ["pairwise"]
     incompatible_path = tmp_path / "incompatible-calibration.json"
+    incompatible_path.write_text(json.dumps(incompatible), encoding="utf-8")
+    with pytest.raises(ValueError, match="contract mismatch"):
+        evaluate_planner._load_frozen_calibration(incompatible_path, cfg)
+    incompatible = json.loads(artifact.read_text())
+    incompatible["config"]["instance_design"] = "correlated_potts"
     incompatible_path.write_text(json.dumps(incompatible), encoding="utf-8")
     with pytest.raises(ValueError, match="contract mismatch"):
         evaluate_planner._load_frozen_calibration(incompatible_path, cfg)

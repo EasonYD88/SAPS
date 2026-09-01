@@ -1,0 +1,134 @@
+{
+  "decision": "INCONCLUSIVE",
+  "evaluation_protocol": {
+    "adaptation_budget_accounting": "per-method terminal labels equal the per-schedule budget times the number of unique schedule geometries evaluated",
+    "adaptation_gain_rng_disjoint": true,
+    "adaptation_rng_key": "base/example/adaptation/sample/round/position",
+    "adaptation_trajectories_per_schedule": 40,
+    "claim_guardrail": "not zero-shot held-out-instance evaluation",
+    "gain_evaluation_rng_key": "base/example/gain-evaluation/epsilon/position; rollout/example/gain-evaluation/state/position/token/rollout",
+    "name": "held-out_reward_instance_fixed-budget_few-shot_adaptation",
+    "reward_instance_specific_b": true,
+    "schedule_planning_gain_rng_disjoint": true,
+    "schedule_planning_rng_key": "base/example/subset-planning/epsilon/position; rollout/example/{subset,dprm}-planning/...",
+    "zero_shot": false
+  },
+  "gates": {
+    "H1": {
+      "ci_high": null,
+      "ci_low": null,
+      "estimate": null,
+      "metric": "held-out Spearman(gamma_pinv, gain)",
+      "pass": null,
+      "reason": "insufficient held-out rows or projection score columns",
+      "theory_assumption_status": "fixed-budget per-instance adaptation; gain evaluation isolated",
+      "threshold": "rho >= 0.75 and rho - rho_diag >= 0.10"
+    },
+    "H2": {
+      "ci_high": null,
+      "ci_low": null,
+      "estimate": -0.7389101970224891,
+      "metric": "random-normalized approximation ratio and action evaluations",
+      "pass": null,
+      "reason": "fewer than 50 held-out examples; excluded=252",
+      "theory_assumption_status": "satisfied",
+      "threshold": "ratio >= 0.90 and evaluations <= subset_exact/10"
+    },
+    "H3": {
+      "ci_high": null,
+      "ci_low": null,
+      "estimate": null,
+      "metric": "paired actual gain: budgeted minus diagonal SAPS",
+      "pass": null,
+      "reason": "fewer than 50 held-out examples or required methods missing",
+      "theory_assumption_status": "satisfied",
+      "threshold": "95% CI lower bound > 0"
+    },
+    "H4": {
+      "ci_high": null,
+      "ci_low": null,
+      "estimate": -0.006399992193456482,
+      "metric": "finite-budget response-vs-latency Pareto AUC",
+      "pass": null,
+      "reason": "fewer than 50 held-out examples; latency=wall_time_sec",
+      "theory_assumption_status": "satisfied",
+      "threshold": "budgeted-minus-random 95% CI lower bound > 0"
+    }
+  },
+  "mechanism_gates": {
+    "M1": {
+      "ci_high": null,
+      "ci_low": null,
+      "estimate": 1.0,
+      "metric": "frozen theory and implementation regressions",
+      "pass": true,
+      "reason": "{\"balanced_width\": true, \"binary_finite_kl\": true, \"duplicate_reparameterization\": true, \"pairwise_dp\": true, \"schur_identity\": true, \"theory_hashes\": true}",
+      "theory_assumption_status": "satisfied",
+      "threshold": "all required regressions pass"
+    },
+    "M2": {
+      "ci_high": null,
+      "ci_low": null,
+      "estimate": 4.0,
+      "metric": "regular-cycle exact-subset coordination construction",
+      "pass": true,
+      "reason": "itemwise=[0, 1, 2] value=2; exact=[0, 2, 4] value=6",
+      "theory_assumption_status": "satisfied",
+      "threshold": "exact batch differs from itemwise and has strictly larger value"
+    },
+    "M3": {
+      "ci_high": null,
+      "ci_low": null,
+      "estimate": 0.002421945319485308,
+      "metric": "first-order tie separated by finite-budget objective",
+      "pass": true,
+      "reason": "first_order=(4.0, 4.0); finite_budget=(0.39332393517990977, 0.3957458804993951)",
+      "theory_assumption_status": "satisfied",
+      "threshold": "first-order scores tied and finite-budget scores distinct"
+    },
+    "M4": {
+      "ci_high": 2.9153187448003743,
+      "ci_low": -5.78472318780345,
+      "estimate": -1.2051626355701897,
+      "metric": "small-epsilon direct/local response ratio",
+      "pass": true,
+      "reason": "epsilon=0.01; examples=16",
+      "theory_assumption_status": "satisfied",
+      "threshold": "95% CI contains 1"
+    },
+    "M5_exact": {
+      "ci_high": null,
+      "ci_low": null,
+      "estimate": null,
+      "metric": "exact product-unary schedule invariance",
+      "pass": null,
+      "reason": "frozen exact-unary diagnostic artifact unavailable",
+      "theory_assumption_status": "satisfied",
+      "threshold": "maximum absolute paired difference <= 1e-12"
+    },
+    "M5_fixed_budget": {
+      "ci_high": null,
+      "ci_low": null,
+      "estimate": null,
+      "metric": "fixed-budget unary controller robustness",
+      "pass": null,
+      "reason": "frozen fixed-budget unary diagnostic artifact unavailable",
+      "theory_assumption_status": "finite-budget operational diagnostic",
+      "threshold": "every method's controller-replicate 95% CI contains 0"
+    },
+    "M6": {
+      "ci_high": 0.028242018397265756,
+      "ci_low": -0.009368603753980907,
+      "estimate": 0.00988423549221475,
+      "metric": "analytic balanced-random baseline error",
+      "pass": true,
+      "reason": "examples=32",
+      "theory_assumption_status": "satisfied",
+      "threshold": "Monte Carlo 95% CI contains 0"
+    }
+  },
+  "reason": "one or more primary gates are not estimable",
+  "screening_decision": "INCONCLUSIVE",
+  "screening_eligible": false,
+  "unary_diagnostic": null
+}

@@ -1,5 +1,5 @@
 from pathlib import Path
-from dataclasses import fields
+from dataclasses import fields, replace
 import inspect
 
 import pytest
@@ -22,6 +22,7 @@ def test_smoke_grid_is_frozen() -> None:
     assert cfg.adaptation_trajectories == 40
     assert cfg.calibration_requested_per_cell == 24
     assert cfg.calibration_max_per_cell == 32
+    assert cfg.calibration_rng_seed == 20260826
 
 
 def test_calibration_probe_budget_order_is_validated(tmp_path: Path) -> None:
@@ -61,6 +62,59 @@ def test_instance_design_round_robins_generator_within_each_reward() -> None:
         assert third == (reward_name, "potts", "balanced_tree", 0.0)
 
 
+def test_correlated_instance_design_covers_each_topology_in_both_splits() -> None:
+    planner = getattr(evaluate_planner, "_instance_spec", None)
+    splitter = getattr(evaluate_planner, "_instance_splits", None)
+    assert callable(planner) and callable(splitter)
+    cfg = replace(
+        ExperimentConfig.from_yaml(Path("configs/smoke.yaml")),
+        instance_design="correlated_potts",
+        couplings=(0.7,),
+    )
+    cfg.validate()
+    splits = splitter(cfg)
+    for reward_name in cfg.rewards:
+        for topology in cfg.topologies:
+            ids = [
+                instance_id
+                for instance_id in range(cfg.num_instances)
+                if planner(cfg, instance_id)
+                == (reward_name, "potts", topology, 0.7)
+            ]
+            assert len(ids) == 2
+            assert {splits[instance_id] for instance_id in ids} == {
+                "development",
+                "held_out",
+            }
+    assert all(
+        planner(cfg, instance_id)[1] == "potts"
+        for instance_id in range(cfg.num_instances)
+    )
+
+
+def test_correlated_instance_coverage_manifest_has_no_factorized_cells() -> None:
+    coverage_builder = getattr(evaluate_planner, "_instance_coverage", None)
+    assert callable(coverage_builder), "runner must serialize effective coverage"
+    cfg = replace(
+        ExperimentConfig.from_yaml(Path("configs/smoke.yaml")),
+        instance_design="correlated_potts",
+        couplings=(0.7,),
+    )
+    coverage = coverage_builder(cfg, tuple(range(cfg.num_instances)))
+    assert len(coverage) == 16
+    assert {row["data_split"] for row in coverage} == {
+        "development",
+        "held_out",
+    }
+    assert {row["topology"] for row in coverage} == {
+        "chain",
+        "balanced_tree",
+    }
+    assert {row["coupling"] for row in coverage} == {0.7}
+    assert {row["generator_regime"] for row in coverage} == {"potts"}
+    assert {row["count"] for row in coverage} == {len(cfg.seeds)}
+
+
 def test_instance_split_is_stratified_by_generator_and_reward() -> None:
     splitter = getattr(evaluate_planner, "_instance_splits", None)
     assert callable(splitter), "runner must freeze development/held-out ids"
@@ -87,6 +141,8 @@ def test_raw_record_schemas_include_split_and_join_key() -> None:
         "schedule_id",
         "candidate_library",
         "scheduler",
+        "num_rounds",
+        "epsilon_target",
     } <= score_fields
 
 
@@ -104,3 +160,19 @@ def test_runner_accepts_original_instance_ids_for_sharding() -> None:
     assert "instance_ids" in inspect.signature(
         evaluate_planner.run_experiment
     ).parameters
+
+
+def test_v3_slurm_dag_freezes_diagnostics_and_forbidden_flows() -> None:
+    diagnostic_job = Path("slurm/run_unary_diagnostics.sbatch").read_text()
+    dag = Path("slurm/submit_smoke_v3_dag.sh").read_text()
+    for script in (diagnostic_job, dag):
+        assert "torch_pr_281_general" in script
+    assert "--mail-user=yd2915@nyu.edu" in diagnostic_job
+    assert "--mail-type=END,FAIL,TIME_LIMIT" in diagnostic_job
+    assert "diagnose-unary" in diagnostic_job
+    assert "--controller-replicates 16" in diagnostic_job
+    assert "--terminal-replicates 16" in diagnostic_job
+    assert "held-out evaluation -> calibration" in dag
+    assert "method results -> calibration" in dag
+    assert "calibration probes -> held-out gain estimates" in dag
+    assert "smoke_correlated_diagnostic.yaml" in dag

@@ -37,5 +37,5 @@ echo "job_id=$SLURM_JOB_ID host=$(hostname) config=$CONFIG_PATH run_id=$RUN_ID"
 python -c 'from feedback_frontier.cli import main; raise SystemExit(main())' \
   validate-config --config "$CONFIG_PATH"
 python -c 'from feedback_frontier.cli import main; raise SystemExit(main())' \
-  run --config "$CONFIG_PATH" --run-id "$RUN_ID"
+  calibrate --config "$CONFIG_PATH" --run-id "$RUN_ID"
 echo "completed calibration run_id=$RUN_ID"

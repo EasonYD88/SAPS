@@ -15,7 +15,21 @@ def direct_response_power(controlled: np.ndarray, base: np.ndarray) -> float:
     base = np.asarray(base, dtype=float)
     if controlled.shape != base.shape or controlled.ndim != 1:
         raise ValueError("controlled and base rewards must be aligned vectors")
-    return float(np.mean((controlled - base) ** 2))
+    if not len(controlled):
+        raise ValueError("controlled and base rewards must be non-empty")
+    differences = controlled - base
+    if len(differences) == 1:
+        # No unbiased estimator of a squared mean exists from one draw. Keep
+        # the legacy single-draw fallback for tiny integration configurations;
+        # all registered smoke/screening/main configurations use at least two.
+        return float(differences[0] ** 2)
+    # Second-order U-statistic for (E[controlled - base])**2. Squaring the
+    # sample mean adds Var(controlled - base) / n, which dominates the local
+    # O(epsilon) signal when terminal rewards are estimated from few rollouts.
+    return float(
+        (differences.sum() ** 2 - np.dot(differences, differences))
+        / (len(differences) * (len(differences) - 1))
+    )
 
 
 @dataclass(frozen=True)
@@ -231,8 +245,11 @@ def estimate_fisher_response_power(
             controlled_rewards.append(controlled_reward)
             base_rewards.append(base_reward)
             direction_kls.append(path_kl)
-        gain = float(np.mean(controlled_rewards) - np.mean(base_rewards))
-        powers.append(gain**2)
+        powers.append(
+            direct_response_power(
+                np.asarray(controlled_rewards), np.asarray(base_rewards)
+            )
+        )
         achieved.append(float(np.mean(direction_kls)))
     return FisherResponseEstimate(
         float(np.mean(powers)),

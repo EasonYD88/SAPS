@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from itertools import product
 
 from feedback_frontier.candidates.libraries import CandidateLibrary
 from feedback_frontier.estimators.response_power import (
@@ -15,6 +16,19 @@ from feedback_frontier.schedulers.base import Schedule
 from feedback_frontier.generators.categorical_product import CategoricalProduct
 from feedback_frontier.rng import SeedBook
 from feedback_frontier.runners import evaluate_planner, probe_response
+
+
+def test_direct_response_power_is_unbiased_for_squared_mean() -> None:
+    # For iid Bernoulli paired differences D with E[D] = 1/2, an estimator of
+    # (E[D])**2 must average to 1/4 over all two-sample outcomes. Squaring the
+    # sample mean has expectation 3/8 and therefore fails this check.
+    estimates = [
+        probe_response.direct_response_power(
+            np.asarray(outcome, dtype=float), np.zeros(2)
+        )
+        for outcome in product((0.0, 1.0), repeat=2)
+    ]
+    assert np.mean(estimates) == pytest.approx(0.25)
 
 
 def test_binary_response_matches_theory_and_is_monotone() -> None:

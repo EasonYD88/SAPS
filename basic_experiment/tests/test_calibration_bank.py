@@ -224,10 +224,14 @@ def test_frozen_artifacts_include_hashes_flows_and_resources(tmp_path) -> None:
             "wall_time_sec": 6.5,
         },
         width_calibration={"status": "complete", "weights": {"0.05": [0, 1]}},
+        probes=pd.DataFrame(
+            [{"epsilon": 0.05, "width": 1, "valid": True}]
+        ),
     )
     expected = {
         "calibration_schedule_bank.jsonl",
         "calibration_coverage.csv",
+        "calibration_response_probes.parquet",
         "calibration_manifest.json",
         "calibration_manifest.sha256",
     }
@@ -243,10 +247,43 @@ def test_frozen_artifacts_include_hashes_flows_and_resources(tmp_path) -> None:
         "method results -> calibration": "forbidden",
         "calibration probes -> held-out gain estimates": "forbidden",
     }
-    for name in ("calibration_schedule_bank.jsonl", "calibration_coverage.csv"):
+    for name in (
+        "calibration_schedule_bank.jsonl",
+        "calibration_coverage.csv",
+        "calibration_response_probes.parquet",
+    ):
         assert manifest["artifact_sha256"][name] == hashlib.sha256(
             (tmp_path / name).read_bytes()
         ).hexdigest()
     manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     assert hashes["calibration_manifest.json"] == manifest_digest
     assert (tmp_path / "calibration_manifest.sha256").read_text().strip() == manifest_digest
+
+
+def test_manifest_remains_inconclusive_when_weight_fit_is_inconclusive(tmp_path) -> None:
+    coverage = pd.DataFrame(
+        [
+            {
+                "epsilon": 0.05,
+                "width": 1,
+                "requested_count": 1,
+                "maximum_count": 1,
+                "attempted_count": 1,
+                "valid_count": 1,
+                "invalid_count": 0,
+                "minimum_valid_count": 1,
+                "passed": True,
+            }
+        ]
+    )
+    write_calibration_artifacts(
+        tmp_path,
+        bank=[],
+        coverage=coverage,
+        metadata={},
+        resources={"model_calls": 0, "terminal_label_calls": 0, "wall_time_sec": 0},
+        width_calibration={"status": "inconclusive", "weights": {}},
+        probes=pd.DataFrame([{"epsilon": 0.05, "width": 1, "valid": True}]),
+    )
+    manifest = json.loads((tmp_path / "calibration_manifest.json").read_text())
+    assert manifest["status"] == "inconclusive"

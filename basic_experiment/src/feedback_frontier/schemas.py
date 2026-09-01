@@ -58,6 +58,8 @@ class ScheduleScoreRecord:
     seed: int
     candidate_library: str
     scheduler: str
+    num_rounds: int
+    epsilon_target: float
     schedule_id: str
     schedule: str
     score_random: float

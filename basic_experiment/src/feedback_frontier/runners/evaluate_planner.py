@@ -41,6 +41,13 @@ from feedback_frontier.generators.categorical_product import CategoricalProduct
 from feedback_frontier.generators.potts_tree import TreePotts
 from feedback_frontier.rewards.synthetic import make_reward
 from feedback_frontier.rng import SeedBook
+from feedback_frontier.runners.calibration_bank import (
+    CALIBRATION_RNG_NAMESPACE,
+    CalibrationTarget,
+    build_schedule_bank,
+    summarize_calibration_coverage,
+    write_calibration_artifacts,
+)
 from feedback_frontier.runners.probe_response import (
     FisherResponseEstimate,
     estimate_fisher_response_power,
@@ -96,13 +103,18 @@ def _load_frozen_calibration(
     path: Path, config: ExperimentConfig
 ) -> tuple[dict[str, object], str]:
     payload = json.loads(path.read_text(encoding="utf-8"))
+    is_targeted_bank = payload.get("rng_namespace") == CALIBRATION_RNG_NAMESPACE
     calibration = payload.get("width_calibration", {})
     if payload.get("status") != "complete" or calibration.get("status") != "complete":
         raise ValueError("frozen calibration artifact must be complete")
-    source_config = payload.get("config", {})
+    source_config = {
+        "instance_design": "mixed",
+        **payload.get("config", {}),
+    }
     contracts = {
         "d": config.d,
         "q": config.q,
+        "instance_design": config.instance_design,
         "epsilons": list(config.epsilons),
         "candidate_libraries": list(config.candidate_libraries),
         "couplings": list(config.couplings),
@@ -112,6 +124,16 @@ def _load_frozen_calibration(
         "seeds": list(config.seeds),
         "width_calibration_minimum": config.width_calibration_minimum,
     }
+    if is_targeted_bank:
+        contracts.update(
+            {
+                "calibration_requested_per_cell": (
+                    config.calibration_requested_per_cell
+                ),
+                "calibration_max_per_cell": config.calibration_max_per_cell,
+                "calibration_rng_seed": config.calibration_rng_seed,
+            }
+        )
     mismatched = {
         key: (source_config.get(key), expected)
         for key, expected in contracts.items()
@@ -135,6 +157,49 @@ def _load_frozen_calibration(
     weights = calibration.get("weights", {})
     if set(weights) != {str(value) for value in config.epsilons}:
         raise ValueError("frozen calibration epsilon coverage mismatch")
+    if is_targeted_bank:
+        expected_flows = {
+            "held-out evaluation -> calibration": "forbidden",
+            "method results -> calibration": "forbidden",
+            "calibration probes -> held-out gain estimates": "forbidden",
+        }
+        if payload.get("forbidden_information_flows") != expected_flows:
+            raise ValueError("frozen calibration information-flow contract mismatch")
+        digest_path = path.with_suffix(".sha256")
+        if (
+            not digest_path.is_file()
+            or digest_path.read_text(encoding="utf-8").strip() != _sha256(path)
+        ):
+            raise ValueError("frozen calibration manifest hash mismatch")
+        for name, expected_digest in payload.get("artifact_sha256", {}).items():
+            artifact = path.parent / name
+            if not artifact.is_file() or _sha256(artifact) != expected_digest:
+                raise ValueError(f"frozen calibration artifact hash mismatch: {name}")
+        coverage_path = path.parent / "calibration_coverage.csv"
+        bank_path = path.parent / "calibration_schedule_bank.jsonl"
+        if not coverage_path.is_file() or not bank_path.is_file():
+            raise ValueError("frozen calibration bank artifacts are missing")
+        coverage = pd.read_csv(coverage_path)
+        if (
+            coverage.empty
+            or not coverage["passed"].astype(bool).all()
+            or not (
+                coverage["valid_count"]
+                >= config.width_calibration_minimum
+            ).all()
+        ):
+            raise ValueError("frozen calibration coverage is incomplete")
+        bank_records = [
+            json.loads(line)
+            for line in bank_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        if any(
+            record.get("data_split") != "development"
+            or record.get("example_id") not in expected_development
+            for record in bank_records
+        ):
+            raise ValueError("frozen calibration bank is not development-only")
     return dict(calibration), _sha256(path)
 
 
@@ -197,7 +262,9 @@ def _dprm_schedule(
         for batch in confidence_schedule(model, rounds).batches
         for position in batch
     )
-    controller_cache = RolloutCache(model, reward, seedbook, example_id)
+    controller_cache = RolloutCache(
+        model, reward, seedbook, example_id, rng_domain="dprm-planning"
+    )
 
     def continuation_reward(
         initial_position: int,
@@ -314,7 +381,9 @@ def _make_batch_value_oracle(
         for batch in confidence_schedule(model, rounds).batches
         for position in batch
     )
-    rollout_cache = RolloutCache(model, reward, seedbook, example_id)
+    rollout_cache = RolloutCache(
+        model, reward, seedbook, example_id, rng_domain="subset-planning"
+    )
 
     def value(first_batch: tuple[int, ...]) -> float:
         schedule = _complete_schedule(
@@ -330,6 +399,7 @@ def _make_batch_value_oracle(
             example_id,
             True,
             rollout_cache=rollout_cache,
+            rng_domain="subset-planning",
         )
         return float(reward(terminal))
 
@@ -439,10 +509,13 @@ def _decode(
     example_id: str,
     controlled: bool,
     rollout_cache: RolloutCache | None = None,
+    rng_domain: str = "gain-evaluation",
 ) -> tuple[np.ndarray, float, int, int]:
     observed: dict[int, int] = {}
     kls = []
-    cache = rollout_cache or RolloutCache(model, reward, seedbook, example_id)
+    cache = rollout_cache or RolloutCache(
+        model, reward, seedbook, example_id, rng_domain=rng_domain
+    )
     for batch in schedule.batches:
         probabilities = model.conditional_marginals(observed)
         selected: dict[int, int] = {}
@@ -457,7 +530,7 @@ def _decode(
                 probs = base
                 kls.append(0.0)
             uniform = seedbook.rng(
-                "base", example_id, "gain-evaluation", epsilon, position
+                "base", example_id, rng_domain, epsilon, position
             ).random()
             selected[position] = int(np.searchsorted(np.cumsum(probs), uniform))
         observed.update(selected)
@@ -721,6 +794,12 @@ def _instance_spec(
     reward_count = len(config.rewards)
     reward_name = config.rewards[instance_id % reward_count]
     stratum_rank = instance_id // reward_count
+    if config.instance_design == "correlated_potts":
+        cell_count = len(config.topologies) * len(config.couplings)
+        cell_rank = stratum_rank % cell_count
+        topology = config.topologies[cell_rank % len(config.topologies)]
+        coupling = config.couplings[cell_rank // len(config.topologies)]
+        return reward_name, "potts", topology, coupling
     regime = stratum_rank % 3
     if regime == 0:
         return reward_name, "product", None, None
@@ -740,7 +819,11 @@ def _instance_splits(config: ExperimentConfig) -> dict[int, str]:
         reward_name, regime, topology, coupling = _instance_spec(
             config, instance_id
         )
-        key = (regime, reward_name)
+        key = (
+            (regime, reward_name, topology, coupling)
+            if config.instance_design == "correlated_potts"
+            else (regime, reward_name)
+        )
         strata.setdefault(key, []).append(instance_id)
     assignments: dict[int, str] = {}
     for ids in strata.values():
@@ -749,6 +832,38 @@ def _instance_splits(config: ExperimentConfig) -> dict[int, str]:
                 "development" if rank % 2 == 0 else "held_out"
             )
     return assignments
+
+
+def _instance_coverage(
+    config: ExperimentConfig, instance_ids: tuple[int, ...]
+) -> list[dict[str, object]]:
+    splits = _instance_splits(config)
+    counts: dict[tuple[object, ...], int] = {}
+    for instance_id in instance_ids:
+        reward_name, regime, topology, coupling = _instance_spec(
+            config, instance_id
+        )
+        key = (
+            splits[instance_id],
+            reward_name,
+            regime,
+            topology,
+            coupling,
+        )
+        counts[key] = counts.get(key, 0) + len(config.seeds)
+    return [
+        {
+            "data_split": key[0],
+            "reward_name": key[1],
+            "generator_regime": key[2],
+            "topology": key[3],
+            "coupling": key[4],
+            "count": count,
+        }
+        for key, count in sorted(
+            counts.items(), key=lambda item: tuple(map(str, item[0]))
+        )
+    ]
 
 
 def _shard_instance_ids(
@@ -763,7 +878,11 @@ def _shard_instance_ids(
 
 def _instance(config: ExperimentConfig, seed: int, instance_id: int):
     book = SeedBook(seed)
-    rng = book.rng("instance", instance_id)
+    rng = (
+        book.rng("instance", instance_id)
+        if config.instance_design == "mixed"
+        else book.rng("instance", config.instance_design, instance_id)
+    )
     reward_name, regime, topology, coupling = _instance_spec(config, instance_id)
     edges = tuple((i, i + 1) for i in range(config.d - 1))
     if regime == "product":
@@ -1217,6 +1336,8 @@ def _run_experiment(
                                 "seed": seed,
                                 "candidate_library": library.source,
                                 "scheduler": method,
+                                "num_rounds": rounds,
+                                "epsilon_target": epsilon,
                                 "schedule_id": schedule_id,
                                 "schedule": schedule_json,
                                 "score_random": random_baseline,
@@ -1320,6 +1441,7 @@ def _run_experiment(
         "commit": None,
         "config": asdict(config),
         "instance_ids": instance_ids,
+        "instance_coverage": _instance_coverage(config, instance_ids),
         "crossfit_folds": 5,
         "pinv_rtol": 1e-12,
         "ridge_sensitivity": {
@@ -1344,9 +1466,15 @@ def _run_experiment(
                 "the number of unique schedule geometries evaluated"
             ),
             "adaptation_gain_rng_disjoint": True,
+            "schedule_planning_gain_rng_disjoint": True,
             "adaptation_rng_key": "base/example/adaptation/sample/round/position",
             "gain_evaluation_rng_key": (
-                "base/example/gain-evaluation/epsilon/position"
+                "base/example/gain-evaluation/epsilon/position; "
+                "rollout/example/gain-evaluation/state/position/token/rollout"
+            ),
+            "schedule_planning_rng_key": (
+                "base/example/subset-planning/epsilon/position; "
+                "rollout/example/{subset,dprm}-planning/..."
             ),
             "claim_guardrail": "not zero-shot held-out-instance evaluation",
         },
@@ -1434,6 +1562,260 @@ def run_experiment(
                 shutil.rmtree(artifact)
             else:
                 artifact.unlink()
+        failure = {
+            "status": "failed",
+            "error_type": type(error).__name__,
+            "message": str(error),
+        }
+        (run_dir / "failure.json").write_text(
+            json.dumps(failure, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        raise
+
+
+class _CalibrationSeedBook:
+    """Map every calibration draw into one isolated registered namespace."""
+
+    def __init__(self, master_seed: int):
+        self._seedbook = SeedBook(master_seed)
+
+    def rng(self, namespace: str, *keys: object) -> np.random.Generator:
+        return self._seedbook.rng(
+            CALIBRATION_RNG_NAMESPACE, namespace, *keys
+        )
+
+
+class _CountingModel:
+    def __init__(self, model, resources: dict[str, float]):
+        self._model = model
+        self._resources = resources
+
+    def conditional_marginals(self, observed):
+        self._resources["model_calls"] += 1
+        return self._model.conditional_marginals(observed)
+
+    def __getattr__(self, name: str):
+        return getattr(self._model, name)
+
+
+class _CountingReward:
+    def __init__(self, reward, resources: dict[str, float]):
+        self._reward = reward
+        self._resources = resources
+
+    def __call__(self, tokens):
+        self._resources["terminal_label_calls"] += 1
+        return self._reward(tokens)
+
+    def __getattr__(self, name: str):
+        return getattr(self._reward, name)
+
+
+def run_width_calibration(config: ExperimentConfig, run_dir: Path) -> None:
+    """Fit and freeze q-ary width weights using development data only."""
+    if config.q <= 2:
+        raise ValueError("width-targeted calibration bank is only for q>2")
+    run_dir.mkdir(parents=True, exist_ok=False)
+    started = time.perf_counter()
+    try:
+        _verify_theory(config)
+        splits = _instance_splits(config)
+        instance_cache: dict[tuple[int, int], tuple[object, object]] = {}
+        targets: list[CalibrationTarget] = []
+        for seed in config.seeds:
+            for instance_id, data_split in sorted(splits.items()):
+                if data_split != "development":
+                    continue
+                _, model, reward, _, _ = _instance(config, seed, instance_id)
+                instance_cache[(seed, instance_id)] = (model, reward)
+                for support in sorted(set(reward.supports)):
+                    targets.append(
+                        CalibrationTarget(
+                            seed=seed,
+                            instance_id=instance_id,
+                            example_id=f"s{seed}-i{instance_id}",
+                            data_split="development",
+                            reward_name=reward.name,
+                            support=tuple(support),
+                        )
+                    )
+        maximum_width = max((len(target.support) for target in targets), default=0)
+        widths = tuple(range(1, maximum_width + 1))
+        bank = build_schedule_bank(
+            d=config.d,
+            rounds=config.rounds,
+            targets=targets,
+            widths=widths,
+            maximum_per_width=config.calibration_max_per_cell,
+            rng_seed=config.calibration_rng_seed,
+        )
+        resources: dict[str, float] = {
+            "model_calls": 0,
+            "terminal_label_calls": 0,
+            "wall_time_sec": 0.0,
+        }
+        probe_rows: list[dict[str, object]] = []
+        attempted_bank = []
+        valid_counts = {
+            (float(epsilon), width): 0
+            for epsilon in config.epsilons
+            for width in widths
+        }
+        calibration_seedbook = _CalibrationSeedBook(config.calibration_rng_seed)
+        for width in widths:
+            for record in (item for item in bank if item.target_width == width):
+                if all(
+                    valid_counts[(float(epsilon), width)]
+                    >= config.calibration_requested_per_cell
+                    for epsilon in config.epsilons
+                ):
+                    break
+                attempted_bank.append(record)
+                raw_model, raw_reward = instance_cache[
+                    (record.seed, record.instance_id)
+                ]
+                model = _CountingModel(raw_model, resources)
+                reward = _CountingReward(raw_reward, resources)
+                library = CandidateLibrary(
+                    (record.support,), CALIBRATION_RNG_NAMESPACE
+                )
+                calibration_example_id = (
+                    f"{record.example_id}/width-calibration/{record.probe_id}"
+                )
+                geometry = None
+                geometry_error = None
+                try:
+                    geometry = _estimate_geometry(
+                        model,
+                        reward,
+                        record.schedule,
+                        library,
+                        calibration_seedbook,
+                        calibration_example_id,
+                        n_samples=config.adaptation_trajectories,
+                        ridge_multiplier=config.ridge_multipliers[0],
+                    )
+                except Exception as error:
+                    geometry_error = f"{type(error).__name__}: {error}"
+                for epsilon in config.epsilons:
+                    cell = (float(epsilon), width)
+                    if (
+                        valid_counts[cell]
+                        >= config.calibration_requested_per_cell
+                    ):
+                        continue
+                    response = FisherResponseEstimate(
+                        float("nan"), 0.0, 0, True
+                    )
+                    error_message = geometry_error
+                    if geometry is not None:
+                        try:
+                            response = estimate_fisher_response_power(
+                                model,
+                                reward,
+                                record.schedule,
+                                geometry,
+                                float(epsilon),
+                                config.response_directions,
+                                config.rollouts,
+                                calibration_seedbook,
+                                calibration_example_id,
+                                record.probe_id,
+                            )
+                        except Exception as error:
+                            error_message = f"{type(error).__name__}: {error}"
+                    valid = bool(
+                        response.positive_rank > 0
+                        and np.isfinite(response.response_power)
+                    )
+                    if valid:
+                        valid_counts[cell] += 1
+                    probe_rows.append(
+                        {
+                            "probe_id": record.probe_id,
+                            "schedule_id": record.schedule_id,
+                            "example_id": record.example_id,
+                            "data_split": "development",
+                            "epsilon": float(epsilon),
+                            "width": width,
+                            "support_size": record.support_size,
+                            "actual_response_power": response.response_power,
+                            "mean_achieved_kl": response.mean_achieved_kl,
+                            "positive_rank": response.positive_rank,
+                            "response_space_empty": response.positive_rank == 0,
+                            "valid": valid,
+                            "error": error_message,
+                        }
+                    )
+        coverage = summarize_calibration_coverage(
+            probe_rows,
+            epsilons=config.epsilons,
+            widths=widths,
+            requested_per_cell=config.calibration_requested_per_cell,
+            minimum_valid_per_cell=config.width_calibration_minimum,
+            maximum_per_cell=config.calibration_max_per_cell,
+        )
+        probe_frame = pd.DataFrame(probe_rows)
+        width_calibration = width_calibration_summary(
+            probe_frame,
+            config.q,
+            config.epsilons,
+            minimum_per_width=config.width_calibration_minimum,
+        )
+        width_calibration = {
+            **width_calibration,
+            "frozen_before_held_out": True,
+            "source": "development-only width-targeted schedule bank",
+        }
+        resources["wall_time_sec"] = time.perf_counter() - started
+        development_ids = sorted(
+            f"s{seed}-i{instance_id}"
+            for seed in config.seeds
+            for instance_id, split in splits.items()
+            if split == "development"
+        )
+        metadata = {
+            "config": asdict(config),
+            "epsilon_grid": list(config.epsilons),
+            "width_grid": list(widths),
+            "support_size_grid": sorted(
+                {len(target.support) for target in targets}
+            ),
+            "batch_capacities": [
+                list(balanced_capacities(config.d, rounds))
+                for rounds in config.rounds
+            ],
+            "rounds": list(config.rounds),
+            "requested_probes_per_cell": config.calibration_requested_per_cell,
+            "minimum_valid_probes_per_cell": config.width_calibration_minimum,
+            "maximum_probes_per_cell": config.calibration_max_per_cell,
+            "rng_seed": config.calibration_rng_seed,
+            "rng_namespace": CALIBRATION_RNG_NAMESPACE,
+            "reward_instance_ids": development_ids,
+            "development_ids": development_ids,
+            "theory_report_sha256": config.theory_report_sha256,
+            "theory_results_sha256": config.theory_results_sha256,
+            "method_selection_use": "forbidden",
+        }
+        write_calibration_artifacts(
+            run_dir,
+            bank=attempted_bank,
+            coverage=coverage,
+            metadata=metadata,
+            resources=resources,
+            width_calibration=width_calibration,
+            probes=probe_frame,
+        )
+        if (
+            not bool(len(coverage))
+            or not bool(coverage["passed"].all())
+            or width_calibration["status"] != "complete"
+        ):
+            raise RuntimeError(
+                "calibration_inconclusive: one or more (epsilon,width) cells "
+                "have fewer than the minimum valid development probes"
+            )
+    except Exception as error:
         failure = {
             "status": "failed",
             "error_type": type(error).__name__,

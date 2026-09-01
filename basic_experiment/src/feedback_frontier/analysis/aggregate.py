@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import itertools
 from dataclasses import asdict
@@ -39,6 +40,23 @@ THEORY_REPORT_SHA256 = (
 THEORY_RESULTS_SHA256 = (
     "fae39d94526f283e59971700a39d128848995ca41eb064dd41e6c6863cb1b12c"
 )
+
+
+def _load_unary_diagnostics(
+    run_dir: Path,
+) -> tuple[pd.DataFrame | None, dict | None]:
+    artifact = run_dir / "unary_null_diagnostics.parquet"
+    manifest_path = run_dir / "unary_null_diagnostic_manifest.json"
+    if not artifact.exists() and not manifest_path.exists():
+        return None, None
+    if not artifact.exists() or not manifest_path.exists():
+        raise ValueError("unary diagnostic artifact set is incomplete")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    expected = manifest.get("artifact_sha256", {}).get(artifact.name)
+    actual = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    if manifest.get("status") != "complete" or expected != actual:
+        raise ValueError("unary diagnostic artifact hash mismatch")
+    return pd.read_parquet(artifact), manifest
 
 
 def make_gate(
@@ -602,6 +620,162 @@ def _unary_null_gate(
     )
 
 
+def _exact_unary_diagnostic_gate(
+    diagnostics: pd.DataFrame | None,
+    diagnostic_manifest: dict | None,
+) -> dict:
+    required = {"diagnostic_kind", "paired_difference"}
+    if (
+        diagnostics is None
+        or diagnostic_manifest is None
+        or diagnostic_manifest.get("status") != "complete"
+        or not required <= set(diagnostics)
+    ):
+        return make_gate(
+            "exact product-unary schedule invariance",
+            "maximum absolute paired difference <= 1e-12",
+            None,
+            None,
+            None,
+            None,
+            "frozen exact-unary diagnostic artifact unavailable",
+        )
+    exact = diagnostics.loc[diagnostics["diagnostic_kind"] == "exact"]
+    differences = pd.to_numeric(
+        exact["paired_difference"], errors="coerce"
+    ).dropna()
+    if differences.empty:
+        return make_gate(
+            "exact product-unary schedule invariance",
+            "maximum absolute paired difference <= 1e-12",
+            None,
+            None,
+            None,
+            None,
+            "exact-unary diagnostic rows unavailable",
+        )
+    maximum = float(differences.abs().max())
+    return make_gate(
+        "exact product-unary schedule invariance",
+        "maximum absolute paired difference <= 1e-12",
+        maximum,
+        None,
+        None,
+        maximum <= 1e-12,
+        f"rows={len(differences)}; reward_instances="
+        f"{diagnostic_manifest.get('reward_instance_count')}",
+    )
+
+
+def _fixed_budget_unary_diagnostic_gate(
+    diagnostics: pd.DataFrame | None,
+    diagnostic_manifest: dict | None,
+    bootstrap_replicates: int,
+) -> dict:
+    required = {
+        "diagnostic_kind",
+        "scheduler",
+        "controller_replicate",
+        "terminal_replicate",
+        "paired_difference",
+    }
+    minimum_replicates = 8
+    if (
+        diagnostics is None
+        or diagnostic_manifest is None
+        or diagnostic_manifest.get("status") != "complete"
+        or not required <= set(diagnostics)
+    ):
+        return make_gate(
+            "fixed-budget unary controller robustness",
+            "every method's controller-replicate 95% CI contains 0",
+            None,
+            None,
+            None,
+            None,
+            "frozen fixed-budget unary diagnostic artifact unavailable",
+            "finite-budget operational diagnostic",
+        )
+    if (
+        int(diagnostic_manifest.get("controller_replicates", 0))
+        < minimum_replicates
+        or int(diagnostic_manifest.get("terminal_replicates", 0))
+        < minimum_replicates
+    ):
+        return make_gate(
+            "fixed-budget unary controller robustness",
+            "every method's controller-replicate 95% CI contains 0",
+            None,
+            None,
+            None,
+            None,
+            "requires at least 8 controller and 8 terminal replicates",
+            "finite-budget operational diagnostic",
+        )
+    fixed = diagnostics.loc[
+        diagnostics["diagnostic_kind"] == "fixed_budget"
+    ].copy()
+    fixed["paired_difference"] = pd.to_numeric(
+        fixed["paired_difference"], errors="coerce"
+    )
+    fixed = fixed.dropna(subset=["paired_difference"])
+    intervals: dict[str, dict[str, float]] = {}
+    for method, method_rows in fixed.groupby("scheduler", sort=True):
+        controller_means = (
+            method_rows.groupby("controller_replicate")["paired_difference"]
+            .mean()
+            .to_numpy(dtype=float)
+        )
+        if len(controller_means) < minimum_replicates:
+            continue
+        estimate, low, high = _bootstrap_mean_interval(
+            controller_means,
+            bootstrap_replicates,
+            20260829,
+        )
+        intervals[str(method)] = {
+            "estimate": estimate,
+            "ci_low": low,
+            "ci_high": high,
+            "controller_replicates": float(len(controller_means)),
+        }
+    methods = set(fixed.get("scheduler", ()))
+    if not intervals or set(intervals) != methods:
+        return make_gate(
+            "fixed-budget unary controller robustness",
+            "every method's controller-replicate 95% CI contains 0",
+            None,
+            None,
+            None,
+            None,
+            "one or more methods lack eight controller replicates",
+            "finite-budget operational diagnostic",
+        )
+    passed = all(
+        interval["ci_low"] <= 0 <= interval["ci_high"]
+        for interval in intervals.values()
+    )
+    details = {
+        "reward_instance_count": diagnostic_manifest.get(
+            "reward_instance_count"
+        ),
+        "replication_scope": (
+            "conditional algorithmic randomness; not reward-instance replication"
+        ),
+        "methods": intervals,
+    }
+    return make_gate(
+        "fixed-budget unary controller robustness",
+        "every method's controller-replicate 95% CI contains 0",
+        float(max(abs(value["estimate"]) for value in intervals.values())),
+        float(min(value["ci_low"] for value in intervals.values())),
+        float(max(value["ci_high"] for value in intervals.values())),
+        passed,
+        json.dumps(details, sort_keys=True),
+        "finite-budget operational diagnostic",
+    )
+
+
 def _random_baseline_gate(
     schedule_scores: pd.DataFrame, bootstrap_replicates: int
 ) -> dict:
@@ -653,6 +827,8 @@ def build_mechanism_gates(
     schedule_scores: pd.DataFrame,
     manifest: dict,
     bootstrap_replicates: int,
+    unary_diagnostics: pd.DataFrame | None = None,
+    unary_diagnostic_manifest: dict | None = None,
 ) -> dict[str, dict]:
     return {
         "M1": _theory_regression_gate(manifest),
@@ -661,7 +837,14 @@ def build_mechanism_gates(
         "M4": _small_epsilon_response_gate(
             trajectories, bootstrap_replicates
         ),
-        "M5": _unary_null_gate(trajectories, bootstrap_replicates),
+        "M5_exact": _exact_unary_diagnostic_gate(
+            unary_diagnostics, unary_diagnostic_manifest
+        ),
+        "M5_fixed_budget": _fixed_budget_unary_diagnostic_gate(
+            unary_diagnostics,
+            unary_diagnostic_manifest,
+            bootstrap_replicates,
+        ),
         "M6": _random_baseline_gate(schedule_scores, bootstrap_replicates),
     }
 
@@ -783,6 +966,8 @@ def build_primary_gates(
         "candidate_library",
         "scheduler",
         "schedule_id",
+        "num_rounds",
+        "epsilon_target",
     ]
     h1_score_columns = [
         "score_diag_um",
@@ -890,6 +1075,9 @@ def analyze_run(run_dir: Path, bootstrap_replicates: int = 10_000) -> dict:
     frame = pd.read_parquet(run_dir / "trajectory_results.parquet")
     schedule_scores = pd.read_csv(run_dir / "schedule_scores.csv")
     manifest = json.loads((run_dir / "experiment_manifest.json").read_text())
+    unary_diagnostics, unary_diagnostic_manifest = _load_unary_diagnostics(
+        run_dir
+    )
     evaluation_protocol = manifest.get(
         "evaluation_protocol",
         {
@@ -928,7 +1116,12 @@ def analyze_run(run_dir: Path, bootstrap_replicates: int = 10_000) -> dict:
     gates = build_primary_gates(frame, schedule_scores, bootstrap_replicates)
     decision = gate_decision(gates)
     mechanism_gates = build_mechanism_gates(
-        frame, schedule_scores, manifest, bootstrap_replicates
+        frame,
+        schedule_scores,
+        manifest,
+        bootstrap_replicates,
+        unary_diagnostics=unary_diagnostics,
+        unary_diagnostic_manifest=unary_diagnostic_manifest,
     )
     screening_decision = gate_decision(mechanism_gates)
     reason = (
@@ -946,6 +1139,7 @@ def analyze_run(run_dir: Path, bootstrap_replicates: int = 10_000) -> dict:
         "screening_decision": screening_decision,
         "screening_eligible": screening_decision == "GO",
         "evaluation_protocol": evaluation_protocol,
+        "unary_diagnostic": unary_diagnostic_manifest,
     }
     (run_dir / "gate_report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"

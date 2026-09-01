@@ -29,6 +29,7 @@ adaptation_trajectories: 40
 width_calibration_minimum: 20
 calibration_requested_per_cell: 24
 calibration_max_per_cell: 32
+calibration_rng_seed: 20260826
 dprm_beta: 1.0
 ridge_multipliers: [1.0e-5, 1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1]
 bootstrap_replicates: 10000

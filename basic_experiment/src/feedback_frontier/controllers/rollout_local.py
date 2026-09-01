@@ -35,11 +35,19 @@ class AlphaCalibration:
 
 
 class RolloutCache:
-    def __init__(self, model, reward, seedbook: SeedBook, example_id: str) -> None:
+    def __init__(
+        self,
+        model,
+        reward,
+        seedbook: SeedBook,
+        example_id: str,
+        rng_domain: str = "gain-evaluation",
+    ) -> None:
         self.model = model
         self.reward = reward
         self.seedbook = seedbook
         self.example_id = example_id
+        self.rng_domain = rng_domain
         self._action_cache: dict[tuple[tuple[tuple[int, int], ...], int, int], NDArray[np.float64]] = {}
         self.n_model_calls = 0
         self.n_reward_calls = 0
@@ -60,6 +68,7 @@ class RolloutCache:
                 uniforms = self.seedbook.rng(
                     "rollout",
                     self.example_id,
+                    self.rng_domain,
                     canonical,
                     position,
                     token,

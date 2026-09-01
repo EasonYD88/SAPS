@@ -17,6 +17,14 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--shard-index", type=int)
     run.add_argument("--num-shards", type=int)
     run.add_argument("--frozen-calibration", type=Path)
+    calibrate = subparsers.add_parser("calibrate")
+    calibrate.add_argument("--config", type=Path, required=True)
+    calibrate.add_argument("--run-id", required=True)
+    diagnose_unary = subparsers.add_parser("diagnose-unary")
+    diagnose_unary.add_argument("--config", type=Path, required=True)
+    diagnose_unary.add_argument("--source-run-dir", type=Path, required=True)
+    diagnose_unary.add_argument("--controller-replicates", type=int, required=True)
+    diagnose_unary.add_argument("--terminal-replicates", type=int, required=True)
     merge = subparsers.add_parser("merge")
     merge.add_argument("--run-id", required=True)
     merge.add_argument("--shard-dir", type=Path, nargs="+", required=True)
@@ -48,6 +56,23 @@ def main(argv: list[str] | None = None) -> int:
             Path("outputs") / args.run_id,
             instance_ids=instance_ids,
             frozen_calibration_path=args.frozen_calibration,
+        )
+        return 0
+    if args.command == "calibrate":
+        from .runners.evaluate_planner import run_width_calibration
+
+        cfg = ExperimentConfig.from_yaml(args.config)
+        run_width_calibration(cfg, Path("outputs") / args.run_id)
+        return 0
+    if args.command == "diagnose-unary":
+        from .runners.unary_diagnostics import run_unary_diagnostics
+
+        cfg = ExperimentConfig.from_yaml(args.config)
+        run_unary_diagnostics(
+            cfg,
+            args.source_run_dir,
+            args.controller_replicates,
+            args.terminal_replicates,
         )
         return 0
     if args.command == "merge":

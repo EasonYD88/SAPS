@@ -244,11 +244,13 @@ def write_calibration_artifacts(
     metadata: dict[str, object],
     resources: dict[str, object],
     width_calibration: dict[str, object],
+    probes: pd.DataFrame,
 ) -> dict[str, str]:
     run_dir.mkdir(parents=True, exist_ok=True)
     bank_path = run_dir / "calibration_schedule_bank.jsonl"
     coverage_path = run_dir / "calibration_coverage.csv"
     manifest_path = run_dir / "calibration_manifest.json"
+    probes_path = run_dir / "calibration_response_probes.parquet"
     bank_path.write_text(
         "".join(
             json.dumps(record.as_dict(), sort_keys=True) + "\n" for record in bank
@@ -256,7 +258,12 @@ def write_calibration_artifacts(
         encoding="utf-8",
     )
     coverage.to_csv(coverage_path, index=False)
-    complete = bool(len(coverage)) and bool(coverage["passed"].all())
+    probes.to_parquet(probes_path, index=False)
+    complete = (
+        bool(len(coverage))
+        and bool(coverage["passed"].all())
+        and width_calibration.get("status") == "complete"
+    )
     manifest = {
         "status": "complete" if complete else "inconclusive",
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -273,6 +280,7 @@ def write_calibration_artifacts(
         "artifact_sha256": {
             bank_path.name: _sha256(bank_path),
             coverage_path.name: _sha256(coverage_path),
+            probes_path.name: _sha256(probes_path),
         },
     }
     manifest_path.write_text(
@@ -286,5 +294,6 @@ def write_calibration_artifacts(
     return {
         bank_path.name: _sha256(bank_path),
         coverage_path.name: _sha256(coverage_path),
+        probes_path.name: _sha256(probes_path),
         manifest_path.name: manifest_digest,
     }
